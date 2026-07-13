@@ -1,5 +1,11 @@
 # Local state -- never commit.
 .browser_profile/
+browser_profile/
 config.json
 __pycache__/
 *.pyc
+# OS profile dirs (Windows/macOS/Linux)
+AppData/analytics_exporter/
+Library/Application Support/analytics_exporter/
+.cache/analytics_exporter/
+.venv/

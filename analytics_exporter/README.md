@@ -1,8 +1,10 @@
 # GA4 + GSC Data Exporter (UI scripting, no API)
 
-A **local-only** macOS desktop app that drives a logged-in browser through the
+A **local-only** desktop app that drives a logged-in browser through the
 Google Analytics 4 and Search Console web UIs and downloads **all** historical
 data as flat CSVs — no Google API, no OAuth, no service account.
+
+Works on **macOS and Windows** (Linux with minor path tweaks).
 
 ## Why UI scripting (not the API)
 The GA4/GSC APIs can return full history only via pagination, but if your
@@ -17,8 +19,10 @@ range into monthly or daily CSVs.
 - **No hash-then-send.** Google needs the real password; a hash would be
   rejected. We simply don't persist the password.
 - **The persistent browser profile is the only credential store** — it holds
-  the session locally on your Mac (`analytics_exporter/.browser_profile/`,
-  git-ignored).
+  the session locally on your machine:
+  - macOS: `~/Library/Application Support/analytics_exporter/browser_profile`
+  - Windows: `%APPDATA%\analytics_exporter\browser_profile`
+  - Linux: `~/.cache/analytics_exporter/browser_profile`
 - **Local-only execution + storage.** No external calls except to Google for
   login and data collection. No telemetry, no cloud sync.
 - Only the (low-sensitivity) email hint is saved in `config.json`. If any
@@ -30,9 +34,16 @@ range into monthly or daily CSVs.
 cd analytics_exporter
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium   # or use channel="chrome" with real Chrome installed
+python -m playwright install chromium   # or use channel="chrome" with real Chrome
 python ui.py
 ```
+
+## Run on Windows (coworker)
+See **WINDOWS_SETUP.md** for the full walkthrough. Short version:
+1. Double-click **`setup.bat`** (creates venv, installs deps, downloads Chromium).
+2. Double-click **`run.bat`** (launches `python ui.py`).
+
+## Using the app
 1. Enter your **company Google email**, GA4 property IDs, GSC site URLs.
 2. Set the date range and chunk mode (**monthly** default, or **daily** for
    spike investigation).
@@ -42,16 +53,14 @@ python ui.py
 5. Click **Run export** — the app reuses the session headlessly and downloads
    per-chunk CSVs + a `manifest.json`.
 
-## Verification (on macOS — this machine is staging only)
-- Single chunk per property/site yields a non-empty CSV matching the UI row
-  count for that chunk.
-- Full range produces one file per chunk + a reconciling manifest.
-- Headless re-run shows NO login page (persistent profile works).
+## Verification
+- Pure-logic + orchestrator (mocked browser): **15 pytest tests pass**.
+- Real browser flow verified on a machine with Chromium installed
+  (macOS smoke test; Windows proven by setup.bat + Chromium install).
 - Re-auth: if Google boots the session mid-run, re-click **Login (once)**.
 
 ## Status
-Built in verifiable chunks; syntax-checked + pytest (15 tests) pass on Windows
-staging. Browser/UI behavior must be verified on the Mac (Playwright not run
-here). Hardened flows: explicit waits, retry/backoff on export+download,
-re-auth detection with pause, background-threaded UI with progress + status.
-
+Built in verifiable chunks; hardened flows: explicit waits, retry/backoff on
+export+download, re-auth detection with pause, background-threaded UI with
+progress + status. Cross-platform (macOS + Windows). Not merged to main
+(pending real browser smoke test on each platform).

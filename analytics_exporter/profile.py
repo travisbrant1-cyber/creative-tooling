@@ -1,6 +1,6 @@
 """Persistent Chromium profile + one-time seed login.
 
-The password is NEVER read or stored by this app. Travis types it directly
+The password is NEVER read or stored by this app. The user types it directly
 into Google's login page in the browser during the (headed) seed-login step.
 After that, the session cookies in `profile_dir` are reused on every headless
 run, so login pages are skipped.
@@ -8,10 +8,11 @@ run, so login pages are skipped.
 Security note: we do NOT hash-and-send credentials (Google needs the real
 password; a hash would be rejected). We do NOT persist the password at all.
 The persistent browser profile IS the only credential store, and it lives
-locally on the Mac.
+locally on the user's machine.
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -21,8 +22,13 @@ from playwright.sync_api import sync_playwright, Browser, BrowserContext
 def get_profile_dir(base: str | None = None) -> Path:
     if base:
         return Path(base)
-    # Default: machine-local, git-ignored location next to the package.
-    return Path(__file__).resolve().parent / ".browser_profile"
+    # Default: machine-local, git-ignored, OS-appropriate location.
+    if os.name == "nt":  # Windows
+        return Path(os.environ.get("APPDATA", Path.home())) / "analytics_exporter" / "browser_profile"
+    if os.name == "posix" and Path("/Users").exists():  # macOS
+        return Path.home() / "Library" / "Application Support" / "analytics_exporter" / "browser_profile"
+    # Linux / other
+    return Path.home() / ".cache" / "analytics_exporter" / "browser_profile"
 
 
 def seed_login(email: str, profile_dir: Path, timeout_s: int = 300) -> bool:
