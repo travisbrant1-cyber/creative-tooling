@@ -37,8 +37,6 @@ def seed_login(email: str, profile_dir: Path, timeout_s: int = 300) -> bool:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)  # headed: real login
         ctx = browser.new_context()
-        # Reuse the same storage so the seed sticks.
-        ctx = browser.new_context(storage_state=None)
         page = ctx.new_page()
         page.goto("https://accounts.google.com/", timeout=60000)
         # Pre-fill the email identifier to save a step (not the password).
@@ -66,14 +64,18 @@ def seed_login(email: str, profile_dir: Path, timeout_s: int = 300) -> bool:
     return (profile_dir / "storage_state.json").exists()
 
 
-def open_authed_context(profile_dir: Path, headless: bool = True) -> tuple[Browser, BrowserContext]:
-    """Reopen the browser with the seeded session (no login page)."""
+def open_authed_context(profile_dir: Path, headless: bool = True) -> tuple["sync_playwright", Browser, BrowserContext]:
+    """Reopen the browser with the seeded session (no login page).
+
+    Returns (playwright, browser, context). The playwright instance is kept
+    alive and MUST be stopped by the caller (see run_all's finally block) —
+    do NOT wrap this in a `with` or the driver exits before the caller uses it.
+    """
+    from playwright.sync_api import sync_playwright
     storage = profile_dir / "storage_state.json"
     if not storage.exists():
         raise RuntimeError("No seeded session found. Run seed_login() first.")
-    with sync_playwright() as p:
-        # NOTE: `with` block closes the browser on exit; callers that need the
-        # browser to persist should manage the lifecycle outside this helper.
-        browser = p.chromium.launch(headless=headless)
-        ctx = browser.new_context(storage_state=str(storage))
-        return browser, ctx
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(headless=headless)
+    ctx = browser.new_context(storage_state=str(storage))
+    return pw, browser, ctx

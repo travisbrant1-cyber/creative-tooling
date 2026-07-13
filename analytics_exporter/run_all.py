@@ -50,7 +50,7 @@ def run_exports(cfg: AppConfig, log_fn: Callable[[str], None] = print) -> dict:
     log_fn(f"Export plan: {len(chunks)} chunk(s) in {cfg.chunk_mode} mode.")
 
     manifest = {"chunks": len(chunks), "files": [], "errors": [], "started": _now()}
-    browser, ctx = open_authed_context(profile_dir, headless=True)
+    pw, browser, ctx = open_authed_context(profile_dir, headless=True)
     try:
         for (cs, ce) in chunks:
             for pid in cfg.ga4_property_ids:
@@ -67,6 +67,8 @@ def run_exports(cfg: AppConfig, log_fn: Callable[[str], None] = print) -> dict:
                     manifest["errors"].append(f"GSC {site} {cs}..{ce}")
     finally:
         browser.close()
+        ctx.close()
+        pw.stop()
 
     manifest["finished"] = _now()
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
