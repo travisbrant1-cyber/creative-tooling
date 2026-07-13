@@ -1,0 +1,5 @@
+# Local state -- never commit.
+.browser_profile/
+config.json
+__pycache__/
+*.pyc
