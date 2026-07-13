@@ -50,5 +50,8 @@ python ui.py
 - Re-auth: if Google boots the session mid-run, re-click **Login (once)**.
 
 ## Status
-Built in verifiable chunks; syntax-checked on Windows staging. Browser/UI
-behavior must be verified on the Mac (Playwright not run here).
+Built in verifiable chunks; syntax-checked + pytest (15 tests) pass on Windows
+staging. Browser/UI behavior must be verified on the Mac (Playwright not run
+here). Hardened flows: explicit waits, retry/backoff on export+download,
+re-auth detection with pause, background-threaded UI with progress + status.
+
