@@ -276,4 +276,58 @@ def test_expect_download_old_ordering_misses_download(tmp_path):
         with page.expect_download(timeout=1000) as dl_info:
             pass
         _ = dl_info.value  # would hang in real Playwright; here it raises
+    # Sanity: new wait_for_download would NOT raise (it clicks inside).
     assert not dest.exists()
+
+
+# ---------------- retry / backoff regression ----------------
+# The happy mocked run never fails a chunk, so RETRY backoff was never
+# exercised — same hidden-gap class as the download race. These force the
+# transient-failure path and prove the orchestrator retries then succeeds,
+# and that exhaustion lands in errors (not a silent drop).
+def test_ga4_retry_backoff_succeeds_after_transient_failure(tmp_path, monkeypatch):
+    """A chunk that fails the first RETRY attempts must still land in files."""
+    import run_all as RA
+    monkeypatch.setattr(RA, "open_authed_context", _fake_open)
+    monkeypatch.setattr(RA, "get_profile_dir", lambda x=None: tmp_path / ".prof")
+    (tmp_path / ".prof").mkdir(exist_ok=True)
+
+    calls = {"n": 0}
+    def flaky_export(ctx, pid, cs, ce, out, log_fn=print):
+        calls["n"] += 1
+        if calls["n"] < RA.RETRY + 1:
+            return None, False  # transient download failure
+        dest = Path(out) / f"ga4_{pid}_{cs}_{ce}.csv"
+        dest.write_text("a,b\n1,2\n", encoding="utf-8")
+        return dest, False
+
+    monkeypatch.setattr(RA, "export_ga4_property", flaky_export)
+    cfg = C.AppConfig(email="a@b.com", ga4_property_ids=["123"], gsc_site_urls=[],
+                      start_date="2024-01-01", end_date="2024-01-31",
+                      chunk_mode="monthly", output_dir=str(tmp_path / "out"))
+    manifest = RA.run_exports(cfg, log_fn=lambda *a, **k: None)
+    assert calls["n"] == RA.RETRY + 1, f"expected {RA.RETRY + 1} attempts, got {calls['n']}"
+    assert len(manifest["files"]) == 1
+    assert manifest["errors"] == []
+
+
+def test_ga4_retry_exhausted_goes_to_errors(tmp_path, monkeypatch):
+    """A chunk that fails every attempt must appear in errors, not files."""
+    import run_all as RA
+    monkeypatch.setattr(RA, "open_authed_context", _fake_open)
+    monkeypatch.setattr(RA, "get_profile_dir", lambda x=None: tmp_path / ".prof")
+    (tmp_path / ".prof").mkdir(exist_ok=True)
+
+    calls = {"n": 0}
+    def always_fail(ctx, pid, cs, ce, out, log_fn=print):
+        calls["n"] += 1
+        return None, False
+
+    monkeypatch.setattr(RA, "export_ga4_property", always_fail)
+    cfg = C.AppConfig(email="a@b.com", ga4_property_ids=["123"], gsc_site_urls=[],
+                      start_date="2024-01-01", end_date="2024-01-31",
+                      chunk_mode="monthly", output_dir=str(tmp_path / "out"))
+    manifest = RA.run_exports(cfg, log_fn=lambda *a, **k: None)
+    assert calls["n"] == RA.RETRY + 1, f"expected {RA.RETRY + 1} attempts, got {calls['n']}"
+    assert manifest["files"] == []
+    assert any("GA4 123" in e for e in manifest["errors"])
