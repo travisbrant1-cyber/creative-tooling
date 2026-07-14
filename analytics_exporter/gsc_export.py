@@ -16,7 +16,7 @@ from typing import Callable
 
 from playwright.sync_api import BrowserContext, Page
 
-from download import wait_for_download, click_export_csv
+from download import wait_for_download
 from reauth import session_logged_out
 
 # Dimension tabs users typically want. Order = export order.
@@ -65,8 +65,8 @@ def export_gsc_site(ctx: BrowserContext, site_url: str, start: str, end: str,
             dest = out_dir / f"gsc_{_safe(site_url)}_{dim}_{start}_{end}.csv"
             try:
                 page.get_by_text(dim, exact=True).first.click(timeout=5000)
-                click_export_csv(page, csv_label="Download .csv", export_btn="Export", log_fn=log_fn)
-                ok = wait_for_download(page, dest, timeout_s=180, log_fn=log_fn)
+                ok = wait_for_download(page, dest, csv_label="Download .csv",
+                                       export_btn="Export", timeout_s=180, log_fn=log_fn)
                 if ok:
                     results.append(dest)
                     log_fn(f"GSC {site_url} [{dim}] [{start}..{end}] -> {dest.name}")

@@ -18,16 +18,31 @@ range into monthly or daily CSVs.
   into Google's own login page during the one-time seed login.
 - **No hash-then-send.** Google needs the real password; a hash would be
   rejected. We simply don't persist the password.
-- **The persistent browser profile is the only credential store** — it holds
-  the session locally on your machine:
-  - macOS: `~/Library/Application Support/analytics_exporter/browser_profile`
-  - Windows: `%APPDATA%\analytics_exporter\browser_profile`
-  - Linux: `~/.cache/analytics_exporter/browser_profile`
+- **The persistent browser profile holds a LIVE Google session — treat it like
+  a password, not "low-sensitivity" local state.** `storage_state.json` inside
+  the profile dir contains unexpired session cookies. Anyone who can read that
+  file can hijack the Google account **without the password and without a
+  re-login prompt**. The app locks it down (0700 dir / 0600 file on macOS/Linux)
+  on every seed + load, but that only blocks *other local users* — not malware
+  running as you, and not a backup/sync service. **Keep the profile dir out of
+  Dropbox/OneDrive/iCloud and out of any git repo.** Only the (low-sensitivity)
+  email hint is saved in `config.json`.
 - **Local-only execution + storage.** No external calls except to Google for
   login and data collection. No telemetry, no cloud sync.
-- Only the (low-sensitivity) email hint is saved in `config.json`. If any
-  secret ever needed at-rest storage, it would be ENCRYPTED with a machine key,
-  never hashed (hashing = verify-only, encryption = retrieve).
+- If any secret ever needed at-rest storage, it would be ENCRYPTED with a
+  machine key, never hashed (hashing = verify-only, encryption = retrieve).
+
+## Compliance / abuse note (read before running)
+This tool scripts a **real Google consumer account through its web UI,
+headlessly**. That is precisely the pattern Google's automated-abuse detection
+is built to catch — which is why `reauth.py` exists (to recover when Google
+boots the session). Depending on your Workspace/account terms, this may violate
+Google's Terms of Service for that surface. It is a **business/legal risk, not
+a code defect**. Use it only where you have authorization to access the data
+(e.g. your own property, or a client who has explicitly consented), and prefer
+the official GA4/GSC **API** where automation is sanctioned. This exporter is a
+fallback for when the API is blocked by the consent-screen / OAS wall — not a
+way to circumvent ToS.
 
 ## Run on macOS
 ```bash

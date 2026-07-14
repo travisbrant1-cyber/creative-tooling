@@ -8,6 +8,7 @@ Hardening features:
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -31,19 +32,35 @@ def _is_complete(path: Path, settle_s: float = 0.5) -> bool:
     return size1 == size2 and size1 > 0
 
 
-def wait_for_download(page: Page, dest: Path, timeout_s: int = 180,
-                      settle_s: float = 0.5, log_fn: Callable[[str], None] = print) -> bool:
-    """Trigger-agnostic: caller opens the Export menu + clicks the download,
-    then calls this to capture + validate the result.
+def wait_for_download(page: Page, dest: Path, *,
+                      csv_label: str = "Download file (CSV)",
+                      export_btn: str = "Export",
+                      timeout_s: int = 180, settle_s: float = 0.5,
+                      log_fn: Callable[[str], None] = print) -> bool:
+    """Open the Export menu, click the CSV option, and capture the resulting
+    download — all inside a single `expect_download()` context.
+
+    CRITICAL: Playwright's `expect_download()` must wrap the *action that
+    triggers* the download. An earlier design clicked first and attached the
+    listener afterward, which raced: a fast download could finish before the
+    listener was registered and `dl_info.value` would then block until the
+    (180s) timeout, looking like every export silently failed. Here the click
+    happens *inside* the `with` block so the event is always captured.
 
     Returns True if a valid (non-empty) CSV landed at `dest`.
     """
     try:
         with page.expect_download(timeout=timeout_s * 1000) as dl_info:
-            pass
+            _click_export_csv(page, csv_label=csv_label, export_btn=export_btn, log_fn=log_fn)
         download = dl_info.value
         # Playwright may already suggest a path; force ours.
         download.save_as(str(dest))
+        # Lock down the export: it is row-level analytics, but restrict perms
+        # so other local accounts can't read it.
+        try:
+            os.chmod(str(dest), 0o600)
+        except OSError:
+            pass
     except Exception as e:
         log_fn(f"  download capture failed: {e}")
         return False
@@ -60,12 +77,12 @@ def wait_for_download(page: Page, dest: Path, timeout_s: int = 180,
     return False
 
 
-def click_export_csv(page: Page, *, csv_label: str = "Download file (CSV)",
-                     export_btn: str = "Export", log_fn: Callable[[str], None] = print) -> None:
+def _click_export_csv(page: Page, *, csv_label: str = "Download file (CSV)",
+                      export_btn: str = "Export", log_fn: Callable[[str], None] = print) -> None:
     """Open the Export menu and click the CSV option, with retries.
 
     Anchors on stable button text, not brittle CSS. Raises on failure so the
-    caller can mark the chunk as errored + retry.
+    caller (wait_for_download) can mark the chunk as errored + retry.
     """
     last_err: Exception | None = None
     for attempt in range(3):

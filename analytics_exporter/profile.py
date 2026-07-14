@@ -2,13 +2,24 @@
 
 The password is NEVER read or stored by this app. The user types it directly
 into Google's login page in the browser during the (headed) seed-login step.
-After that, the session cookies in `profile_dir` are reused on every headless
-run, so login pages are skipped.
+After that, the session is persisted as `storage_state.json` (live Google
+session cookies) in `profile_dir` and reused on every headless run, so login
+pages are skipped.
 
-Security note: we do NOT hash-and-send credentials (Google needs the real
-password; a hash would be rejected). We do NOT persist the password at all.
-The persistent browser profile IS the only credential store, and it lives
-locally on the user's machine.
+SECURITY — READ THIS:
+- The password is never captured or persisted. ✅
+- BUT `storage_state.json` IS a live, unexpired Google session credential.
+  Anyone who can read that file can hijack the Google account WITHOUT knowing
+  the password and WITHOUT triggering a re-login. Treat it exactly like a
+  password: it is the only thing standing between an attacker and the account.
+- We lock the file down (0700 dir / 0600 file on POSIX) at write time, but
+  that only protects against *other local users* — not against malware running
+  as your user, and not against a backup/sync service that copies the profile
+  dir. Do not put the profile dir under Dropbox/OneDrive/iCloud or any repo.
+- This app scripts a real Google consumer account through its web UI
+  headlessly. That is the kind of automated behavior Google's abuse detection
+  is built to flag (hence reauth.py's existence). It may violate Google's ToS
+  for that surface. Business risk, not a code defect — name it explicitly.
 """
 from __future__ import annotations
 
@@ -29,6 +40,23 @@ def get_profile_dir(base: str | None = None) -> Path:
         return Path.home() / "Library" / "Application Support" / "analytics_exporter" / "browser_profile"
     # Linux / other
     return Path.home() / ".cache" / "analytics_exporter" / "browser_profile"
+
+
+def _lock_session_file(state_path: Path) -> None:
+    """Restrict the persisted Google session to the owner only.
+
+    `storage_state.json` is a live, unexpired session credential — equivalent
+    to a password. On POSIX we set 0700 on the dir and 0600 on the file. On
+    Windows the ACL story is weaker (inheritance), so we only attempt the
+    chmod where it applies and otherwise rely on the user keeping the profile
+    dir off shared/synced locations (see the module docstring).
+    """
+    try:
+        # Best-effort; ignore on platforms/FS where it's a no-op.
+        os.chmod(str(state_path), 0o600)
+        os.chmod(str(state_path.parent), 0o700)
+    except OSError:
+        pass
 
 
 def seed_login(email: str, profile_dir: Path, timeout_s: int = 300) -> bool:
@@ -65,7 +93,9 @@ def seed_login(email: str, profile_dir: Path, timeout_s: int = 300) -> bool:
                 pass
             time.sleep(3)
         # Persist the authenticated state for headless reuse.
-        ctx.storage_state(path=str(profile_dir / "storage_state.json"))
+        state_path = profile_dir / "storage_state.json"
+        ctx.storage_state(path=str(state_path))
+        _lock_session_file(state_path)
         browser.close()
     return (profile_dir / "storage_state.json").exists()
 
@@ -84,4 +114,5 @@ def open_authed_context(profile_dir: Path, headless: bool = True) -> tuple["sync
     pw = sync_playwright().start()
     browser = pw.chromium.launch(headless=headless)
     ctx = browser.new_context(storage_state=str(storage))
+    _lock_session_file(storage)  # re-assert perms in case they drifted
     return pw, browser, ctx

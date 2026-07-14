@@ -197,3 +197,83 @@ def test_run_exports_mocked(tmp_path, monkeypatch):
     assert len(manifest["files"]) == 1
     assert manifest["errors"] == []
     assert (tmp_path / "out" / "ga4_123_2024-01-01_2024-01-31.csv").exists()
+
+
+# ---------------- expect_download ordering regression ----------------
+class _ClickRecordLocator:
+    """Records when the export click fires AND whether it fired while a
+    download listener was open (models the original race)."""
+    def __init__(self, page):
+        self._page = page
+    def click(self, *a, **k):
+        # The click "triggers" the download. The download is only observable
+        # if a listener (expect_download) is currently open.
+        self._page._fired = True
+        if self._page._in_listener:
+            self._page._fired_in_listener = True
+    @property
+    def first(self):
+        return self
+
+
+def _race_page_factory():
+    """A fake page whose download only materializes if the export click
+    happened INSIDE an open expect_download() context."""
+    class _RacePage(_FakePage):
+        def __init__(self):
+            super().__init__()
+            self._in_listener = False
+            self._fired = False
+            self._fired_in_listener = False
+        def get_by_role(self, *a, **k):
+            return _ClickRecordLocator(self)
+        def get_by_text(self, *a, **k):
+            return _ClickRecordLocator(self)
+        def expect_download(self, *a, **k):
+            class _RaceCtx:
+                def __enter__(self):
+                    self._page._in_listener = True
+                    return self
+                def __exit__(self, *e):
+                    self._page._in_listener = False
+                    return False
+                @property
+                def value(self):
+                    # download only valid if the click fired WHILE the
+                    # listener was open (the new, correct ordering)
+                    if not self._page._fired_in_listener:
+                        raise RuntimeError("download fired before listener attached")
+                    return _FakeDownload()
+            ctx = _RaceCtx()
+            ctx._page = self
+            return ctx
+    return _RacePage()
+
+
+def test_expect_download_wraps_click(tmp_path):
+    """Regression: the export click must happen INSIDE expect_download,
+    or a fast download is missed (the original race)."""
+    import download as D
+    page = _race_page_factory()
+    dest = tmp_path / "out.csv"
+    dest.parent.mkdir(exist_ok=True)
+    ok = D.wait_for_download(page, dest, csv_label="X", export_btn="Y", timeout_s=5)
+    assert ok is True
+    assert dest.exists()
+
+
+def test_expect_download_old_ordering_misses_download(tmp_path):
+    """Mirror of the original bug: if the click fires BEFORE the listener
+    opens, the download is missed. This pins the behavior so the fix is
+    obviously correct (and would fail under the old code path)."""
+    page = _race_page_factory()
+    dest = tmp_path / "out2.csv"
+    dest.parent.mkdir(exist_ok=True)
+    # Reproduce OLD sequence: click first, THEN open expect_download.
+    _ClickRecordLocator(page).click()  # fires the download trigger early
+    import pytest
+    with pytest.raises(RuntimeError):
+        with page.expect_download(timeout=1000) as dl_info:
+            pass
+        _ = dl_info.value  # would hang in real Playwright; here it raises
+    assert not dest.exists()

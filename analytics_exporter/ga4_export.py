@@ -19,7 +19,7 @@ from typing import Callable
 
 from playwright.sync_api import BrowserContext, Page
 
-from download import wait_for_download, click_export_csv
+from download import wait_for_download
 from reauth import session_logged_out
 
 
@@ -64,8 +64,8 @@ def export_ga4_property(ctx: BrowserContext, property_id: str, start: str, end: 
             return None, True
         if not _set_date_range(page, start, end, log_fn):
             return None, False
-        click_export_csv(page, csv_label="Download file (CSV)", export_btn="Export", log_fn=log_fn)
-        ok = wait_for_download(page, dest, timeout_s=180, log_fn=log_fn)
+        ok = wait_for_download(page, dest, csv_label="Download file (CSV)",
+                               export_btn="Export", timeout_s=180, log_fn=log_fn)
         if ok:
             log_fn(f"GA4 {property_id} [{start}..{end}] -> {dest.name}")
             return dest, False
